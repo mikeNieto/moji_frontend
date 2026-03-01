@@ -158,8 +158,16 @@ class MainActivity : ComponentActivity() {
             StateManager.currentState.collect { state ->
                 when (state) {
                     RobotState.SEARCHING -> {
-                        Log.d("MainActivity", "State → SEARCHING: Starting face search")
-                        faceSearchOrchestrator.startSearch(this@MainActivity)
+                        // TODO: Face recognition temporarily disabled — re-enable when ready
+                        // Log.d("MainActivity", "State → SEARCHING: Starting face search")
+                        // faceSearchOrchestrator.startSearch(this@MainActivity)
+                        Log.d("MainActivity", "State → SEARCHING: Face recognition DISABLED — skipping to LISTENING")
+                        interactionOrchestrator.startInteraction(
+                            personId = "unknown",
+                            faceRecognized = false,
+                            faceConfidence = 0f
+                        )
+                        StateManager.updateState(RobotState.LISTENING)
                     }
                     RobotState.IDLE -> {
                         // Ensure face search is stopped when returning to IDLE
@@ -279,6 +287,17 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
         label = "searching_rotation"
     )
 
+    // Animación de rotación rápida para LOADING (cargando)
+    val loadingRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = if (currentState == RobotState.LOADING) 360f else 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "loading_rotation"
+    )
+
     // Parpadeo lento para DISCONNECTED
     val disconnectedAlpha by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -306,6 +325,7 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
         else -> scale
     }
     val finalRotation = when (currentState) {
+        RobotState.LOADING -> loadingRotation
         RobotState.SEARCHING, RobotState.THINKING -> searchingRotation
         else -> 0f
     }

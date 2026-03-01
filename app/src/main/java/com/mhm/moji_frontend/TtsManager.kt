@@ -66,11 +66,15 @@ class TtsManager(
                 tts?.setPitch(preferences.ttsPitch)
                 isInitialized = true
                 
+                // Mark as loading until startup utterance completes
+                StateManager.updateState(RobotState.LOADING)
+
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         Log.d("TtsManager", "TTS Started: $utteranceId")
                         _isSpeaking.value = true
-                        if (StateManager.currentState.value != RobotState.LISTENING) {
+                        val state = StateManager.currentState.value
+                        if (state != RobotState.LISTENING && state != RobotState.LOADING) {
                             StateManager.updateState(RobotState.RESPONDING)
                         }
                     }
@@ -108,8 +112,9 @@ class TtsManager(
 
                 // Hablar en voz alta directamente al iniciar para forzar al motor a cargar correctamente
                 speak("Moyi iniciado!") {
-                    // Volver al estado inicial una vez que el mensaje de arranque termine
-                    if (StateManager.currentState.value == RobotState.RESPONDING) {
+                    // Volver al estado IDLE una vez que el modelo esté listo y el mensaje de arranque termine
+                    val state = StateManager.currentState.value
+                    if (state == RobotState.LOADING || state == RobotState.RESPONDING) {
                         StateManager.updateState(RobotState.IDLE)
                     }
                 }

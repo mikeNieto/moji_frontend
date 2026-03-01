@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class RobotState(val emojiCode: String, val description: String) {
+    LOADING("231B", "Cargando..."),
     IDLE("1F916", "Moji está reposando"),
     LISTENING("1F442", "Escuchando..."),
     SEARCHING("1F50D", "Buscando..."),
@@ -17,14 +18,14 @@ enum class RobotState(val emojiCode: String, val description: String) {
 }
 
 object StateManager {
-    private val _currentState = MutableStateFlow(RobotState.IDLE)
+    private val _currentState = MutableStateFlow(RobotState.LOADING)
     val currentState: StateFlow<RobotState> = _currentState.asStateFlow()
 
     private val _currentEmotionTag = MutableStateFlow<String?>(null)
     val currentEmotionTag: StateFlow<String?> = _currentEmotionTag.asStateFlow()
     
     // Subtítulos
-    private val _currentSubtitle = MutableStateFlow(RobotState.IDLE.description)
+    private val _currentSubtitle = MutableStateFlow(RobotState.LOADING.description)
     val currentSubtitle: StateFlow<String> = _currentSubtitle.asStateFlow()
 
     // Robot battery level (from ESP32 telemetry via BLE)

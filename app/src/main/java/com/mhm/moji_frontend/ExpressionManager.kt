@@ -14,6 +14,7 @@ object ExpressionManager {
 
     // Fixed state emojis (always the same emoji for each state)
     private val stateEmojiMap = mapOf(
+        "loading" to "231B",        // ⌛
         "idle" to "1F916",          // 🤖
         "listening" to "1F442",     // 👂
         "searching" to "1F50D",     // 🔍

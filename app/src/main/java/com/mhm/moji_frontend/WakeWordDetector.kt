@@ -86,6 +86,12 @@ class WakeWordDetector(
     }
 
     private fun handleWakeWordDetected() {
+        // Ignore wake word while TTS engine / model is still loading
+        if (StateManager.currentState.value == RobotState.LOADING) {
+            Log.d("WakeWordDetector", "Wake word ignored — app is still loading")
+            return
+        }
+
         // Interrumpir TTS si está activo
         ttsManager.stop()
 
