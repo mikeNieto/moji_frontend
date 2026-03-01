@@ -54,6 +54,13 @@ class FaceSearchOrchestrator(
     var onFaceFound: ((boundingBox: Rect, imageProxy: ImageProxy) -> Unit)? = null
 
     /**
+     * Callback invoked when the interaction should start with the backend.
+     * Called after face detection (or with "unknown" if no onFaceFound handler is set).
+     * Parameters: personId, faceRecognized, faceConfidence
+     */
+    var onInteractionReady: ((personId: String, faceRecognized: Boolean, faceConfidence: Float) -> Unit)? = null
+
+    /**
      * Start the face search process. Call this when entering SEARCHING state.
      * @param lifecycleOwner Required by CameraX for lifecycle binding.
      */
@@ -101,8 +108,10 @@ class FaceSearchOrchestrator(
                 stopSearch()
                 Log.d(TAG, "[ESP32-STUB] Would send STOP command")
                 StateManager.updateSubtitle("No puedo verte. Por favor acércate a mi.")
-                ttsManager.speak("No puedo verte. Por favor acércate a mi.")
-                StateManager.updateState(RobotState.IDLE)
+                ttsManager.speak("No puedo verte. Por favor acércate a mi.") {
+                    // Volver a IDLE solo después de que el TTS termine de hablar
+                    StateManager.updateState(RobotState.IDLE)
+                }
             }
         }
     }
@@ -134,13 +143,17 @@ class FaceSearchOrchestrator(
         if (onFaceFound != null) {
             onFaceFound?.invoke(boundingBox, imageProxy)
         } else {
-            // Step 6 not implemented yet — just log and go to LISTENING
-            Log.d(TAG, "Face detected but no onFaceFound handler set (Step 6 not implemented)")
+            // Step 6 (FaceNet) not implemented yet — treat as unknown person
+            Log.d(TAG, "Face detected, no FaceNet handler — treating as unknown person")
             Log.d(TAG, "Face bounding box: left=${boundingBox.left}, top=${boundingBox.top}, " +
                     "right=${boundingBox.right}, bottom=${boundingBox.bottom}")
             imageProxy.close()
-            // Temporarily transition to LISTENING until Step 6 handles GREETING/REGISTERING
             coroutineScope.launch {
+                // Notify backend: interaction_start with unknown person
+                onInteractionReady?.invoke("unknown", false, 0f)
+                // Transition to GREETING briefly then LISTENING
+                StateManager.updateState(RobotState.GREETING)
+                kotlinx.coroutines.delay(500)
                 StateManager.updateState(RobotState.LISTENING)
             }
         }

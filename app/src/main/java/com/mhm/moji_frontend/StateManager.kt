@@ -27,6 +27,14 @@ object StateManager {
     private val _currentSubtitle = MutableStateFlow(RobotState.IDLE.description)
     val currentSubtitle: StateFlow<String> = _currentSubtitle.asStateFlow()
 
+    // Robot battery level (from ESP32 telemetry via BLE)
+    private val _robotBatteryLevel = MutableStateFlow(100)
+    val robotBatteryLevel: StateFlow<Int> = _robotBatteryLevel.asStateFlow()
+
+    // WebSocket connection status
+    private val _isBackendConnected = MutableStateFlow(false)
+    val isBackendConnected: StateFlow<Boolean> = _isBackendConnected.asStateFlow()
+
     fun updateState(newState: RobotState) {
         _currentState.value = newState
         _currentSubtitle.value = newState.description
@@ -41,5 +49,13 @@ object StateManager {
     
     fun updateSubtitle(subtitle: String) {
         _currentSubtitle.value = subtitle
+    }
+
+    fun updateRobotBattery(level: Int) {
+        _robotBatteryLevel.value = level
+    }
+
+    fun updateBackendConnection(connected: Boolean) {
+        _isBackendConnected.value = connected
     }
 }

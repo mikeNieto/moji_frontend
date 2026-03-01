@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraManager: CameraManager
     private lateinit var faceDetectorManager: FaceDetectorManager
     private lateinit var faceSearchOrchestrator: FaceSearchOrchestrator
+    private lateinit var wsClient: RobotWebSocketClient
+    private lateinit var interactionOrchestrator: InteractionOrchestrator
     private var stateObserverJob: Job? = null
 
     private val requiredPermissions = arrayOf(
@@ -100,23 +102,56 @@ class MainActivity : ComponentActivity() {
         
         appPreferences = AppPreferences(this)
         ttsManager = TtsManager(this, appPreferences)
-        
-        audioRecorder = AudioRecorder(
-            onAudioCaptured = { aacData ->
-                // TODO: Send data via WebSocket
-                Log.d("MainActivity", "Audio capturado y comprimido: ${aacData.size} bytes")
-            }
-        )
+
+        // Initialize WebSocket client (Step 7)
+        wsClient = RobotWebSocketClient(appPreferences)
 
         // Initialize camera and face detection (Step 5)
         cameraManager = CameraManager(this)
         faceDetectorManager = FaceDetectorManager()
+
+        // Initialize InteractionOrchestrator (Step 7)
+        interactionOrchestrator = InteractionOrchestrator(
+            context = this,
+            wsClient = wsClient,
+            ttsManager = ttsManager,
+            cameraManager = cameraManager,
+            preferences = appPreferences
+        )
+
+        // Wire AudioRecorder to send captured audio via WebSocket
+        audioRecorder = AudioRecorder(
+            onAudioCaptured = { aacData ->
+                Log.d("MainActivity", "Audio capturado y comprimido: ${aacData.size} bytes")
+                if (wsClient.isReady()) {
+                    interactionOrchestrator.sendAudioData(aacData)
+                } else {
+                    Log.w("MainActivity", "WebSocket not ready — cannot send audio")
+                    // Fallback: go back to IDLE if backend is not connected
+                    CoroutineScope(Dispatchers.Main).launch {
+                        StateManager.updateState(RobotState.IDLE)
+                    }
+                }
+            },
+            continuousListeningManager = interactionOrchestrator.continuousListeningManager
+        )
+
         faceSearchOrchestrator = FaceSearchOrchestrator(
             cameraManager = cameraManager,
             faceDetectorManager = faceDetectorManager,
             ttsManager = ttsManager,
             appPreferences = appPreferences
         )
+
+        // Wire interaction_start to be sent as soon as face recognition finishes
+        faceSearchOrchestrator.onInteractionReady = { personId, faceRecognized, faceConfidence ->
+            Log.d("MainActivity", "onInteractionReady: personId=$personId, recognized=$faceRecognized, confidence=$faceConfidence")
+            interactionOrchestrator.startInteraction(
+                personId = personId,
+                faceRecognized = faceRecognized,
+                faceConfidence = faceConfidence
+            )
+        }
 
         // Observe state changes to trigger face search on SEARCHING
         stateObserverJob = CoroutineScope(Dispatchers.Main).launch {
@@ -126,8 +161,15 @@ class MainActivity : ComponentActivity() {
                         Log.d("MainActivity", "State → SEARCHING: Starting face search")
                         faceSearchOrchestrator.startSearch(this@MainActivity)
                     }
-                    RobotState.IDLE, RobotState.ERROR -> {
-                        // Ensure face search is stopped when returning to IDLE or ERROR
+                    RobotState.IDLE -> {
+                        // Ensure face search is stopped when returning to IDLE
+                        if (faceSearchOrchestrator.isActive()) {
+                            faceSearchOrchestrator.stopSearch()
+                        }
+                        // Stop continuous listening when IDLE is reached
+                        interactionOrchestrator.continuousListeningManager.stop()
+                    }
+                    RobotState.ERROR -> {
                         if (faceSearchOrchestrator.isActive()) {
                             faceSearchOrchestrator.stopSearch()
                         }
@@ -139,14 +181,23 @@ class MainActivity : ComponentActivity() {
 
         wakeWordDetector = WakeWordDetector(
             context = this,
-            appPreferences = appPreferences,
             ttsManager = ttsManager,
+            sensitivity = appPreferences.wakeWordSensitivity,
             onWakeWordDetected = {
                 Log.d("MainActivity", "Wake word callback executed")
                 // Stop any active face search from a previous interaction
                 faceSearchOrchestrator.stopSearch()
-            }
+                // Stop continuous listening — new interaction cycle
+                interactionOrchestrator.continuousListeningManager.stop()
+            },
+            continuousListeningManager = interactionOrchestrator.continuousListeningManager
         )
+
+        // Start the InteractionOrchestrator (listens to WebSocket messages)
+        interactionOrchestrator.start()
+
+        // Connect to WebSocket backend
+        wsClient.connect()
 
         // Request permissions before starting Porcupine
         requestAllPermissions()
@@ -172,6 +223,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         stateObserverJob?.cancel()
+        interactionOrchestrator.stop()
+        wsClient.disconnect()
         faceSearchOrchestrator.release()
         cameraManager.stop()
         audioRecorder.stop()
@@ -186,6 +239,7 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
     val currentState by StateManager.currentState.collectAsState()
     val currentEmotionTag by StateManager.currentEmotionTag.collectAsState()
     val currentSubtitle by StateManager.currentSubtitle.collectAsState()
+    val isBackendConnected by StateManager.isBackendConnected.collectAsState()
 
     // Determine the expression string for ExpressionManager based on state
     val expression = currentEmotionTag ?: currentState.name.lowercase()
@@ -214,10 +268,10 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
         label = "listening_pulse"
     )
 
-    // Animación de rotación lenta si está buscando (SEARCHING)
+    // Animación de rotación lenta si está buscando (SEARCHING) o pensando (THINKING)
     val searchingRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (currentState == RobotState.SEARCHING) 360f else 0f,
+        targetValue = if (currentState == RobotState.SEARCHING || currentState == RobotState.THINKING) 360f else 0f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Restart
@@ -225,8 +279,38 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
         label = "searching_rotation"
     )
 
-    val finalScale = if (currentState == RobotState.LISTENING) listeningScale else scale
-    val finalRotation = if (currentState == RobotState.SEARCHING) searchingRotation else 0f
+    // Parpadeo lento para DISCONNECTED
+    val disconnectedAlpha by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = if (currentState == RobotState.DISCONNECTED) 0.3f else 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "disconnected_blink"
+    )
+
+    // Shake horizontal para ERROR
+    val errorShake by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = if (currentState == RobotState.ERROR) 15f else 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "error_shake"
+    )
+
+    val finalScale = when (currentState) {
+        RobotState.LISTENING -> listeningScale
+        else -> scale
+    }
+    val finalRotation = when (currentState) {
+        RobotState.SEARCHING, RobotState.THINKING -> searchingRotation
+        else -> 0f
+    }
+    val finalAlpha = if (currentState == RobotState.DISCONNECTED) disconnectedAlpha else 1f
+    val finalTranslationX = if (currentState == RobotState.ERROR) errorShake else 0f
 
     Box(
         modifier = Modifier
@@ -250,7 +334,9 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
                 .graphicsLayer(
                     scaleX = finalScale,
                     scaleY = finalScale,
-                    rotationZ = finalRotation
+                    rotationZ = finalRotation,
+                    alpha = finalAlpha,
+                    translationX = finalTranslationX
                 ),
             contentScale = ContentScale.Fit
         )

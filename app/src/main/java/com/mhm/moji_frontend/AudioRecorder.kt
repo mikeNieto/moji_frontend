@@ -18,7 +18,8 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 class AudioRecorder(
-    private val onAudioCaptured: (ByteArray) -> Unit
+    private val onAudioCaptured: (ByteArray) -> Unit,
+    private val continuousListeningManager: ContinuousListeningManager? = null
 ) {
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
@@ -30,10 +31,10 @@ class AudioRecorder(
         private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        private const val RMS_THRESHOLD = 500.0 // Threshold for silence vs speech detection
+        private const val RMS_THRESHOLD = 800.0  // Raised: better separation from ambient noise
         private const val SILENCE_DURATION_MS = 1500L // 1.5 seconds of silence AFTER speech to stop
         private const val MAX_DURATION_MS = 30000L // 30 seconds max timeout
-        private const val INITIAL_GRACE_PERIOD_MS = 3000L // 3 seconds grace period to start speaking
+        private const val INITIAL_GRACE_PERIOD_MS = 2000L // 2 seconds to start speaking, then discard
     }
 
     private var previousState: RobotState = RobotState.IDLE
@@ -46,8 +47,12 @@ class AudioRecorder(
                     // (i.e., after face search completes: SEARCHING/GREETING/REGISTERING → LISTENING)
                     // Don't record during the brief IDLE→LISTENING→SEARCHING transition
                     startRecording()
-                } else if (state != RobotState.THINKING && state != RobotState.LISTENING) {
-                    // Stop if state changed to something else (e.g. IDLE, ERROR) but not if we just changed it to THINKING
+                } else if (state != RobotState.THINKING &&
+                           state != RobotState.LISTENING &&
+                           state != RobotState.GREETING &&
+                           state != RobotState.REGISTERING) {
+                    // Stop recording on terminal/idle states, but not on transitional states
+                    // (GREETING/REGISTERING are brief transitions before LISTENING)
                     stopRecording()
                 }
                 previousState = state
@@ -63,7 +68,8 @@ class AudioRecorder(
 
         recordingJob = coroutineScope.launch {
             // Give the OS time to fully release the microphone from the wake word detector
-            kotlinx.coroutines.delay(300)
+            // and for any residual TTS echo to decay
+            kotlinx.coroutines.delay(500)
 
             val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
             if (bufferSize == AudioRecord.ERROR || bufferSize == AudioRecord.ERROR_BAD_VALUE) {
@@ -186,7 +192,19 @@ class AudioRecorder(
                 audioRecord?.stop()
                 audioRecord?.release()
                 audioRecord = null
-                
+
+                // If no speech was ever detected, discard the audio entirely
+                // and return to IDLE — don't waste a server round-trip on silence
+                if (!hasDetectedSpeech) {
+                    Log.d(TAG, "No speech detected — discarding audio and returning to IDLE")
+                    launch(Dispatchers.Main) {
+                        // Stop continuous listening so WakeWordDetector can restart Porcupine
+                        continuousListeningManager?.stop()
+                        StateManager.updateState(RobotState.IDLE)
+                    }
+                    return@launch
+                }
+
                 val pcmData = pcmDataStream.toByteArray()
                 Log.d(TAG, "Audio capturado: ${pcmData.size} bytes")
 
@@ -200,11 +218,8 @@ class AudioRecorder(
                 if (aacData.isNotEmpty()) {
                     Log.d(TAG, "Audio compressed to AAC: ${aacData.size} bytes")
                     onAudioCaptured(aacData)
-                    // Return to IDLE so wake word detection restarts
-                    // (This will be replaced by proper response handling when WebSocket is implemented)
-                    launch(Dispatchers.Main) {
-                        StateManager.updateState(RobotState.IDLE)
-                    }
+                    // State stays in THINKING — InteractionOrchestrator handles
+                    // the response via WebSocket and transitions to RESPONDING/LISTENING
                 } else {
                     Log.e(TAG, "Failed to compress audio to AAC")
                     launch(Dispatchers.Main) {

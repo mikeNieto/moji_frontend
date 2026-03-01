@@ -3,6 +3,7 @@ package com.mhm.moji_frontend.data
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.mhm.moji_frontend.BuildConfig
 import java.util.UUID
 
 class AppPreferences(context: Context) {
@@ -19,7 +20,7 @@ class AppPreferences(context: Context) {
     )
 
     var apiKey: String?
-        get() = sharedPreferences.getString("api_key", null)
+        get() = sharedPreferences.getString("api_key", BuildConfig.API_KEY.ifBlank { null })
         set(value) = sharedPreferences.edit().putString("api_key", value).apply()
 
     var backendUrl: String
@@ -27,7 +28,8 @@ class AppPreferences(context: Context) {
         set(value) = sharedPreferences.edit().putString("backend_url", value).apply()
 
     var serverCertFingerprint: String?
-        get() = sharedPreferences.getString("server_cert_fingerprint", null)
+        // Default loaded from BuildConfig (injected from local.properties at build time — never in git)
+        get() = sharedPreferences.getString("server_cert_fingerprint", BuildConfig.SERVER_CERT_FINGERPRINT)
         set(value) = sharedPreferences.edit().putString("server_cert_fingerprint", value).apply()
 
     var deviceId: String

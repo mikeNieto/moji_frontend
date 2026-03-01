@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Config for Moji Robot App.
+    The actual certificate pinning is enforced by OkHttp CertificatePinner in RobotWebSocketClient,
+    using the SHA-256 fingerprint injected at build time from local.properties (never committed to git).
+
+    This config only allows the self-signed cert domain and disables cleartext traffic.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">192.168.2.200</domain>
+        <trust-anchors>
+            <!-- Trust system CAs + user-installed CAs to accept the self-signed server cert -->
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

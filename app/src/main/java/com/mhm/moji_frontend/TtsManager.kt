@@ -13,9 +13,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 class TtsManager(
     context: Context,
@@ -26,7 +30,14 @@ class TtsManager(
     private var isInitialized = false
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
-    
+
+    // Tracks whether the TTS engine is currently speaking
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
+
+    // Counts utterances queued but not yet finished
+    private val activeUtterances = AtomicInteger(0)
+
     private val scope = CoroutineScope(Dispatchers.Main)
 
     init {
@@ -58,6 +69,7 @@ class TtsManager(
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         Log.d("TtsManager", "TTS Started: $utteranceId")
+                        _isSpeaking.value = true
                         if (StateManager.currentState.value != RobotState.LISTENING) {
                             StateManager.updateState(RobotState.RESPONDING)
                         }
@@ -66,15 +78,28 @@ class TtsManager(
                     override fun onDone(utteranceId: String?) {
                         Log.d("TtsManager", "TTS Done: $utteranceId")
                         abandonAudioFocus()
-                        if (StateManager.currentState.value == RobotState.RESPONDING) {
-                            StateManager.updateState(RobotState.IDLE)
+                        if (activeUtterances.decrementAndGet() <= 0) {
+                            activeUtterances.set(0)
+                            _isSpeaking.value = false
                         }
+                        // Invoke and remove any registered onDone callback
+                        utteranceId?.let { id ->
+                            onDoneCallbacks.remove(id)?.invoke()
+                        }
+                        // State transitions are now handled by InteractionOrchestrator
+                        // via stream_end messages from WebSocket
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         Log.e("TtsManager", "TTS Error: $utteranceId")
                         abandonAudioFocus()
+                        if (activeUtterances.decrementAndGet() <= 0) {
+                            activeUtterances.set(0)
+                            _isSpeaking.value = false
+                        }
+                        // Remove callback on error too
+                        utteranceId?.let { id -> onDoneCallbacks.remove(id) }
                         if (StateManager.currentState.value == RobotState.RESPONDING) {
                             StateManager.updateState(RobotState.ERROR)
                         }
@@ -82,23 +107,39 @@ class TtsManager(
                 })
 
                 // Hablar en voz alta directamente al iniciar para forzar al motor a cargar correctamente
-                speak("Moyi iniciado!")
+                speak("Moyi iniciado!") {
+                    // Volver al estado inicial una vez que el mensaje de arranque termine
+                    if (StateManager.currentState.value == RobotState.RESPONDING) {
+                        StateManager.updateState(RobotState.IDLE)
+                    }
+                }
             }
         } else {
             Log.e("TtsManager", "Initialization Failed!")
         }
     }
 
-    fun speak(text: String): Job {
+    // Tracks onDone callbacks keyed by utteranceId
+    private val onDoneCallbacks = mutableMapOf<String, () -> Unit>()
+
+    fun speak(text: String, onDone: (() -> Unit)? = null): Job {
         return scope.launch(Dispatchers.IO) {
             if (!isInitialized) {
                 Log.w("TtsManager", "TTS not initialized yet")
                 return@launch
             }
-            
+
             requestAudioFocus()
-            
+
             val utteranceId = UUID.randomUUID().toString()
+            // QUEUE_FLUSH cancels all previously queued utterances — reset counter and callbacks
+            activeUtterances.set(0)
+            onDoneCallbacks.clear()
+
+            if (onDone != null) {
+                onDoneCallbacks[utteranceId] = onDone
+            }
+            activeUtterances.incrementAndGet()
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
         }
     }
@@ -107,13 +148,15 @@ class TtsManager(
         if (isInitialized) {
             tts?.stop()
             abandonAudioFocus()
+            activeUtterances.set(0)
+            _isSpeaking.value = false
         }
     }
 
     fun speakChunked(flow: Flow<String>): Job {
         return scope.launch(Dispatchers.IO) {
             if (!isInitialized) return@launch
-            
+
             var buffer = ""
             flow.collect { chunk ->
                 buffer += chunk
@@ -123,15 +166,20 @@ class TtsManager(
                         val sentence = sentences[i].trim()
                         if (sentence.isNotEmpty()) {
                             requestAudioFocus()
-                            tts?.speak(sentence, TextToSpeech.QUEUE_ADD, null, UUID.randomUUID().toString())
+                            val uid = UUID.randomUUID().toString()
+                            activeUtterances.incrementAndGet()
+                            tts?.speak(sentence, TextToSpeech.QUEUE_ADD, null, uid)
                         }
                     }
                     buffer = sentences.last()
                 }
             }
+            // Speak any remaining buffered text
             if (buffer.trim().isNotEmpty()) {
                 requestAudioFocus()
-                tts?.speak(buffer.trim(), TextToSpeech.QUEUE_ADD, null, UUID.randomUUID().toString())
+                val uid = UUID.randomUUID().toString()
+                activeUtterances.incrementAndGet()
+                tts?.speak(buffer.trim(), TextToSpeech.QUEUE_ADD, null, uid)
             }
         }
     }
@@ -174,5 +222,7 @@ class TtsManager(
         tts?.stop()
         tts?.shutdown()
         abandonAudioFocus()
+        activeUtterances.set(0)
+        _isSpeaking.value = false
     }
 }

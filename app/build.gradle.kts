@@ -1,13 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
-val localProperties = java.util.Properties().apply {
-    val localPropsFile = rootProject.file("local.properties")
-    if (localPropsFile.exists()) {
-        load(localPropsFile.inputStream())
-    }
+val localProperties = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.inputStream().use { localProperties.load(it) }
 }
 
 android {
@@ -23,7 +24,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "PORCUPINE_ACCESS_KEY", "\"${localProperties.getProperty("PORCUPINE_ACCESS_KEY", "")}\"")
+        buildConfigField("String", "PORCUPINE_ACCESS_KEY", "\"${localProperties.getOrDefault("PORCUPINE_ACCESS_KEY", "")}\"")
+        buildConfigField("String", "SERVER_CERT_FINGERPRINT", "\"${localProperties.getOrDefault("SERVER_CERT_FINGERPRINT", "")}\"")
+        buildConfigField("String", "API_KEY", "\"${localProperties.getOrDefault("API_KEY", "")}\"")
     }
 
     buildTypes {

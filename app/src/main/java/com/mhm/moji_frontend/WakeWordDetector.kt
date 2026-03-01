@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import ai.picovoice.porcupine.PorcupineManager
 import ai.picovoice.porcupine.PorcupineManagerCallback
-import com.mhm.moji_frontend.data.AppPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,9 +14,11 @@ import java.io.FileOutputStream
 
 class WakeWordDetector(
     private val context: Context,
-    private val appPreferences: AppPreferences,
     private val ttsManager: TtsManager,
-    private val onWakeWordDetected: () -> Unit
+    private val onWakeWordDetected: () -> Unit,
+    /** When set, Porcupine only restarts if continuous listening is NOT active */
+    var continuousListeningManager: ContinuousListeningManager? = null,
+    private val sensitivity: Float = 0.7f
 ) {
     private var porcupineManager: PorcupineManager? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
@@ -25,8 +26,8 @@ class WakeWordDetector(
 
     fun start() {
         try {
-            // Using a placeholder access key, in a real app this should be in AppPreferences
-            val accessKey = appPreferences.apiKey ?: BuildConfig.PORCUPINE_ACCESS_KEY
+            // Porcupine AccessKey — separate from the backend API key
+            val accessKey = BuildConfig.PORCUPINE_ACCESS_KEY
 
             // Try to load custom keyword if exists in raw resources
             var keywordPath = ""
@@ -70,7 +71,7 @@ class WakeWordDetector(
                 builder.setKeyword(ai.picovoice.porcupine.Porcupine.BuiltInKeyword.PORCUPINE)
             }
 
-            builder.setSensitivity(appPreferences.wakeWordSensitivity)
+            builder.setSensitivity(sensitivity)
 
             porcupineManager = builder.build(context, PorcupineManagerCallback { keywordIndex ->
                 Log.d("WakeWordDetector", "Wake word detected! Index: $keywordIndex")
@@ -119,6 +120,14 @@ class WakeWordDetector(
             // and wait for a terminal state where we should restart Porcupine
             StateManager.currentState.drop(1).collect { state ->
                 if (state == RobotState.IDLE || state == RobotState.ERROR || state == RobotState.DISCONNECTED) {
+                    // Only restart Porcupine if continuous listening is NOT active
+                    val clm = continuousListeningManager
+                    if (clm != null && clm.isActive) {
+                        Log.d("WakeWordDetector", "State=$state but continuous listening is active — NOT restarting Porcupine")
+                        // Don't cancel observer — keep watching for when continuous listening ends
+                        return@collect
+                    }
+
                     Log.d("WakeWordDetector", "State returned to $state, restarting Porcupine")
                     // Small delay to ensure AudioRecorder has fully released the mic
                     kotlinx.coroutines.delay(500)
