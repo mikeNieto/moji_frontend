@@ -117,13 +117,14 @@ class RobotWebSocketClient(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "WS Received text: $text")
+                Log.d(TAG, "WS ← TEXT (${text.length} chars): $text")
                 val message = WsMessageParser.parseIncoming(text)
+                Log.d(TAG, "WS ← PARSED: ${message::class.simpleName} → $message")
                 handleIncomingMessage(message)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                Log.d(TAG, "WS Received binary: ${bytes.size} bytes")
+                Log.d(TAG, "WS ← BINARY: ${bytes.size} bytes | hex=${bytes.hex()}")
                 // Binary messages from backend are not expected in current protocol
             }
 
