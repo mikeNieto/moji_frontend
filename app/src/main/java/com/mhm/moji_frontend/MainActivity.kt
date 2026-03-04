@@ -16,12 +16,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -219,12 +217,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             Moji_frontendTheme {
-                RobotFaceScreen(
-                    onTestSpeak = {
-                        StateManager.updateEmotion("happy")
-                        ttsManager.speak("Hola. Esta es mi voz. Espero te guste!")
-                    }
-                )
+                RobotFaceScreen()
             }
         }
     }
@@ -243,7 +236,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
+fun RobotFaceScreen() {
     val currentState by StateManager.currentState.collectAsState()
     val currentEmotionTag by StateManager.currentEmotionTag.collectAsState()
     val currentSubtitle by StateManager.currentSubtitle.collectAsState()
@@ -373,27 +366,5 @@ fun RobotFaceScreen(onTestSpeak: () -> Unit = {}) {
                 .padding(bottom = 32.dp)
         )
 
-        // Esquina superior izquierda (cambia estados)
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .align(Alignment.TopStart)
-                .background(Color.Transparent)
-                .clickable {
-                    val nextState = RobotState.entries[(currentState.ordinal + 1) % RobotState.entries.size]
-                    StateManager.updateState(nextState)
-                }
-        )
-
-        // Esquina superior derecha (botón oculto de prueba de TTS)
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .align(Alignment.TopEnd)
-                .background(Color.Transparent)
-                .clickable {
-                    onTestSpeak()
-                }
-        )
     }
 }

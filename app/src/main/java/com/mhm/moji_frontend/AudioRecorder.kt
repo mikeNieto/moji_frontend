@@ -32,9 +32,9 @@ class AudioRecorder(
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val RMS_THRESHOLD = 700.0  // better separation from ambient noise
-        private const val SILENCE_DURATION_MS = 2500L // 2.5 seconds of silence AFTER speech to stop
+        private const val SILENCE_DURATION_MS = 1500L // 1.5 seconds of silence AFTER speech to stop
         private const val MAX_DURATION_MS = 30000L // 30 seconds max timeout
-        private const val INITIAL_GRACE_PERIOD_MS = 2000L // 2 seconds to start speaking, then discard
+        private const val INITIAL_GRACE_PERIOD_MS = 3000L // 2 seconds to start speaking, then discard
     }
 
     private var previousState: RobotState = RobotState.IDLE

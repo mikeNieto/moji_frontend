@@ -18,7 +18,7 @@ class WakeWordDetector(
     private val onWakeWordDetected: () -> Unit,
     /** When set, Porcupine only restarts if continuous listening is NOT active */
     var continuousListeningManager: ContinuousListeningManager? = null,
-    private val sensitivity: Float = 0.7f
+    private val sensitivity: Float = 0.2f
 ) {
     private var porcupineManager: PorcupineManager? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
@@ -108,10 +108,13 @@ class WakeWordDetector(
             // Now that Porcupine is stopped, transition to LISTENING briefly
             // then immediately to SEARCHING (camera face search)
             StateManager.updateState(RobotState.LISTENING)
-            // Cancelar cualquier interacción activa
-            onWakeWordDetected()
-            // Transition to SEARCHING — the FaceSearchOrchestrator will be triggered
-            StateManager.updateState(RobotState.SEARCHING)
+            // Confirm wake word detection with a TTS, then proceed only after it finishes
+            ttsManager.speak("¿Si?") {
+                // Cancelar cualquier interacción activa
+                onWakeWordDetected()
+                // Transition to SEARCHING — the FaceSearchOrchestrator will be triggered
+                StateManager.updateState(RobotState.SEARCHING)
+            }
 
             // Start observing state to restart Porcupine when recording is done
             startStateObserver()
