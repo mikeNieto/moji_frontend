@@ -19,8 +19,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.CircleShape
+// import androidx.compose.foundation.layout.padding  // DESHABILITADO: subtitle
+// import androidx.compose.material3.Text             // DESHABILITADO: subtitle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,10 +32,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+// import androidx.compose.ui.text.font.FontFamily  // DESHABILITADO: subtitle
+// import androidx.compose.ui.text.font.FontWeight  // DESHABILITADO: subtitle
+// import androidx.compose.ui.unit.dp               // DESHABILITADO: subtitle
+// import androidx.compose.ui.unit.sp               // DESHABILITADO: subtitle
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -239,8 +241,8 @@ class MainActivity : ComponentActivity() {
 fun RobotFaceScreen() {
     val currentState by StateManager.currentState.collectAsState()
     val currentEmotionTag by StateManager.currentEmotionTag.collectAsState()
-    val currentSubtitle by StateManager.currentSubtitle.collectAsState()
-    val isBackendConnected by StateManager.isBackendConnected.collectAsState()
+    // val currentSubtitle by StateManager.currentSubtitle.collectAsState() // DESHABILITADO TEMPORALMENTE
+    // val isBackendConnected by StateManager.isBackendConnected.collectAsState()
 
     // Determine the expression string for ExpressionManager based on state
     val expression = currentEmotionTag ?: currentState.name.lowercase()
@@ -333,7 +335,16 @@ fun RobotFaceScreen() {
         val emojiUrl = ExpressionManager.getEmojiUrl(expression)
         val context = LocalContext.current
         
-        // Emoji Centrado (80% del alto)
+        // Capa 1: Círculo azul claro decorativo (50% del alto), independiente del emoji
+        Box(
+            modifier = Modifier
+                .fillMaxHeight(0.7f)
+                .aspectRatio(1f)
+                .align(Alignment.Center)
+                .background(Color(0xFF1B86AB), shape = CircleShape)
+        )
+
+        // Capa 2: Emoji flotando encima (80% del alto), independiente del círculo
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(emojiUrl)
@@ -342,7 +353,8 @@ fun RobotFaceScreen() {
                 .build(),
             contentDescription = "Cara de Moji ($expression)",
             modifier = Modifier
-                .fillMaxHeight(0.8f) // 80% de la pantalla
+                .fillMaxHeight(0.8f)
+                .aspectRatio(1f)
                 .align(Alignment.Center)
                 .graphicsLayer(
                     scaleX = finalScale,
@@ -354,17 +366,17 @@ fun RobotFaceScreen() {
             contentScale = ContentScale.Fit
         )
 
-        // Texto Inferior (10% de la pantalla)
-        Text(
-            text = currentSubtitle,
-            color = Color(0xFF88CCEE), // Azul claro metalizado
-            fontSize = 24.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
-        )
+        // Texto Inferior (10% de la pantalla) — DESHABILITADO TEMPORALMENTE
+        // Text(
+        //     text = currentSubtitle,
+        //     color = Color(0xFF88CCEE), // Azul claro metalizado
+        //     fontSize = 24.sp,
+        //     fontFamily = FontFamily.Monospace,
+        //     fontWeight = FontWeight.Medium,
+        //     modifier = Modifier
+        //         .align(Alignment.BottomCenter)
+        //         .padding(bottom = 32.dp)
+        // )
 
     }
 }
