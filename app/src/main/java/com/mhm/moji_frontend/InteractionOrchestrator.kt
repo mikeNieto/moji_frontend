@@ -23,11 +23,11 @@ import java.util.UUID
  * InteractionOrchestrator: The central coordinator for the full interaction flow.
  *
  * Listens to WebSocket messages and orchestrates:
- * - Emotion tag → update robot face IMMEDIATELY
+ * - Emotion tag → transition to responding, but defer visible emojis to response_meta
  * - Text chunks → accumulate and feed to TTS in sentence chunks
  * - Capture requests → activate camera, capture photo/video, send back
  * - Response meta → show emoji sequences, log ESP32 actions (BLE in Step 8)
- * - Stream end → enter continuous listening mode (60s)
+ * - Stream end → enter continuous listening mode
  * - Person registered → store face embedding in local DB (when Room is available)
  * - Error messages → handle gracefully
  *
@@ -35,17 +35,22 @@ import java.util.UUID
  * - Sending interaction_start when face recognition completes
  * - Sending audio data captured by AudioRecorder
  * - Sending audio_end after the last audio frame
- * - Continuous listening mode (60s window without wake word)
+ * - Continuous listening mode (brief window without wake word)
  */
 class InteractionOrchestrator(
     private val context: Context,
     private val wsClient: RobotWebSocketClient,
     private val ttsManager: TtsManager,
     private val cameraManager: CameraManager,
-    private val preferences: AppPreferences
+    private val preferences: AppPreferences,
+    private val esp32Protocol: ESP32Protocol? = null
 ) {
     companion object {
         private const val TAG = "InteractionOrchestrator"
+        private const val RESPONSE_ACTION_DELAY_AFTER_TTS_START_MS = 1000L
+        private const val TTS_START_WAIT_TIMEOUT_MS = 2500L
+        private const val LEAD_IN_EMOJI_DURATION_MS = 1000L
+        private const val FINAL_EMOJI_FALLBACK_DURATION_MS = 1000L
     }
 
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -56,6 +61,7 @@ class InteractionOrchestrator(
     private var ttsJob: Job? = null
     private var messageCollectorJob: Job? = null
     private var emojiSequenceJob: Job? = null
+    private var pendingResponseActionsJob: Job? = null
 
     // Current interaction tracking
     private var currentRequestId: String? = null
@@ -111,6 +117,7 @@ class InteractionOrchestrator(
         messageCollectorJob?.cancel()
         ttsJob?.cancel()
         emojiSequenceJob?.cancel()
+        pendingResponseActionsJob?.cancel()
         continuousListeningManager.stop()
         Log.d(TAG, "InteractionOrchestrator stopped")
     }
@@ -212,17 +219,20 @@ class InteractionOrchestrator(
     }
 
     /**
-     * Handle emotion tag — update robot face IMMEDIATELY.
-     * This is the FIRST message of each interaction response.
+     * Handle emotion tag — move to RESPONDING and prepare TTS.
+     * The visible emoji is now driven by response_meta.expression.emojis.
      */
     private fun handleEmotion(msg: WsIncoming.EmotionMessage) {
         Log.d(TAG, "Emotion received: ${msg.emotion} (person: ${msg.personIdentified})")
 
+        emojiSequenceJob?.cancel()
+
         // Update state to RESPONDING
         StateManager.updateState(RobotState.RESPONDING)
 
-        // Update emotion IMMEDIATELY — before TTS starts
-        StateManager.updateEmotion(msg.emotion)
+        // Intentionally disabled: this early emotion arrives before the contextual emoji sequence.
+        // currentEmotionShownAtElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        // StateManager.updateEmotion(msg.emotion)
 
         // Start TTS chunked flow for this interaction
         startTtsStreaming()
@@ -277,17 +287,33 @@ class InteractionOrchestrator(
             // This would trigger saving to Room DB when Step 6 is fully integrated
         }
 
-        // Show emoji sequence from expression data
+        // Show emoji sequence from response data
         msg.expression?.let { expr ->
             showEmojiSequence(expr)
         }
 
-        // Log ESP32 actions (BLE will be implemented in Step 8)
+        // Send physical actions to ESP32 via BLE 1s after TTS actually starts
         if (msg.actions.isNotEmpty()) {
-            Log.d(TAG, "[ESP32-STUB] Would send ${msg.actions.size} actions to ESP32:")
-            msg.actions.forEach { action ->
-                Log.d(TAG, "  → ${action.type}: speed=${action.speed}, degrees=${action.degrees}, " +
-                        "duration=${action.durationMs}ms, r=${action.r}, g=${action.g}, b=${action.b}")
+            Log.d(TAG, "Scheduling ${msg.actions.size} actions for ESP32 via BLE")
+            pendingResponseActionsJob?.cancel()
+            pendingResponseActionsJob = scope.launch {
+                val remainingDelay = ttsManager.getRemainingDelayUntilSpeechStartOffset(
+                    offsetMs = RESPONSE_ACTION_DELAY_AFTER_TTS_START_MS,
+                    timeoutMs = TTS_START_WAIT_TIMEOUT_MS
+                )
+
+                if (remainingDelay == null) {
+                    Log.w(TAG, "TTS did not start in time; sending BLE actions without extra delay")
+                } else if (remainingDelay > 0) {
+                    Log.d(TAG, "Waiting ${remainingDelay}ms before sending BLE actions")
+                    delay(remainingDelay)
+                }
+
+                esp32Protocol?.executeActions(msg.actions)
+                    ?: msg.actions.forEach { action ->
+                        Log.d(TAG, "[ESP32-STUB] ${action.type}: speed=${action.speed}, degrees=${action.degrees}, " +
+                                "duration=${action.durationMs}ms, r=${action.r}, g=${action.g}, b=${action.b}")
+                    }
             }
         }
     }
@@ -300,33 +326,24 @@ class InteractionOrchestrator(
         currentRequestId = null
 
         // Wait for TTS to finish before activating the microphone.
-        // This prevents the mic from capturing TTS speaker output (acoustic echo).
         scope.launch {
-            // Give the TTS engine time to start speaking (stream_end can arrive
-            // before the last utterance has been queued/started by the engine).
             delay(300)
 
-            // Wait for TTS to START speaking first (avoids the race where isSpeaking
-            // is still false when stream_end arrives, causing first { !it } to resolve instantly)
             val ttsStarted = withTimeoutOrNull(2000L) {
                 ttsManager.isSpeaking.first { it }
             }
             if (ttsStarted != null) {
-                // TTS started — now wait until it fully finishes
                 ttsManager.isSpeaking.first { !it }
             }
 
-            // Extra buffer to let the speaker echo fully decay before opening the mic
-            delay(1200)
+            emojiSequenceJob?.cancel()
 
-            // Enter continuous listening mode (60s window)
+            // Enter continuous listening mode for the next input.
             continuousListeningManager.startOrReset()
-
-            // Transition to LISTENING for the next input
             StateManager.updateState(RobotState.LISTENING)
             StateManager.updateSubtitle("Te escucho...")
 
-            Log.d(TAG, "Continuous listening active (60s window)")
+            Log.d(TAG, "TTS finished — emoji sequence stopped and continuous listening active")
         }
     }
 
@@ -347,11 +364,12 @@ class InteractionOrchestrator(
      * Handle face scan actions — ESP32 rotation commands.
      */
     private fun handleFaceScanActions(msg: WsIncoming.FaceScanActions) {
-        Log.d(TAG, "[ESP32-STUB] Face scan actions received: ${msg.actions.size} actions")
-        msg.actions.forEach { action ->
-            Log.d(TAG, "  → ${action.type}: degrees=${action.degrees}, speed=${action.speed}, " +
-                    "duration=${action.durationMs}ms")
-        }
+        Log.d(TAG, "Face scan actions received: ${msg.actions.size} actions")
+        esp32Protocol?.executeActions(msg.actions)
+            ?: msg.actions.forEach { action ->
+                Log.d(TAG, "[ESP32-STUB] ${action.type}: degrees=${action.degrees}, speed=${action.speed}, " +
+                        "duration=${action.durationMs}ms")
+            }
     }
 
     /**
@@ -380,24 +398,55 @@ class InteractionOrchestrator(
     private fun startTtsStreaming() {
         // Cancel any existing TTS job
         ttsJob?.cancel()
+        pendingResponseActionsJob?.cancel()
         ttsJob = ttsManager.speakChunked(textChunkFlow)
     }
 
     // ======================== Emoji Sequence ========================
 
     /**
-     * Show a sequence of contextual emojis from response_meta.
-     * Each emoji is shown for `durationPerEmoji` ms with the specified transition.
+     * Show the contextual emojis from response_meta.
+     * The first emojis are shown for 1s each, and the final one stays until TTS finishes.
      */
     private fun showEmojiSequence(expression: ExpressionData) {
         emojiSequenceJob?.cancel()
+
+        val plan = EmojiSequencePlanner.createPlan(expression.emojis)
+        val finalEmoji = plan.finalEmoji
+        if (finalEmoji == null) {
+            Log.d(TAG, "Response meta contained no contextual emojis")
+            return
+        }
+
         emojiSequenceJob = scope.launch {
-            for (emojiCode in expression.emojis) {
-                Log.d(TAG, "Showing contextual emoji: $emojiCode (${expression.transition})")
-                // Update the emoji via ExpressionManager
-                // We use the hex code directly — ExpressionManager needs to support this
+            Log.d(
+                TAG,
+                "Response meta contained ${expression.emojis.size} emojis; " +
+                    "showing ${plan.leadInEmojis.size} lead-in emojis and holding the final emoji"
+            )
+
+            for (emojiCode in plan.leadInEmojis) {
+                Log.d(TAG, "Showing lead-in contextual emoji for ${LEAD_IN_EMOJI_DURATION_MS}ms: $emojiCode (${expression.transition})")
                 StateManager.updateEmotion(emojiCode)
-                delay(expression.durationPerEmoji)
+                delay(LEAD_IN_EMOJI_DURATION_MS)
+            }
+
+            Log.d(TAG, "Showing final contextual emoji until TTS finishes: $finalEmoji (${expression.transition})")
+            StateManager.updateEmotion(finalEmoji)
+
+            val speechSessionStarted = ttsManager.getRemainingDelayUntilSpeechStartOffset(
+                offsetMs = 0L,
+                timeoutMs = TTS_START_WAIT_TIMEOUT_MS
+            ) != null
+
+            if (!speechSessionStarted) {
+                Log.w(TAG, "TTS did not start in time; keeping final emoji briefly as fallback")
+                delay(FINAL_EMOJI_FALLBACK_DURATION_MS)
+                return@launch
+            }
+
+            if (ttsManager.isSpeaking.value) {
+                ttsManager.isSpeaking.first { !it }
             }
         }
     }
@@ -423,6 +472,3 @@ class InteractionOrchestrator(
         }
     }
 }
-
-
-

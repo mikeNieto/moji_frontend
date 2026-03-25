@@ -35,7 +35,8 @@ class FaceSearchOrchestrator(
     private val cameraManager: CameraManager,
     private val faceDetectorManager: FaceDetectorManager,
     private val ttsManager: TtsManager,
-    private val appPreferences: AppPreferences
+    private val appPreferences: AppPreferences,
+    private val esp32Protocol: ESP32Protocol? = null
 ) {
 
     companion object {
@@ -73,8 +74,13 @@ class FaceSearchOrchestrator(
 
         Log.d(TAG, "Starting face search...")
 
-        // Log ESP32 search command (BLE not implemented yet — Step 8)
-        Log.d(TAG, "[ESP32-STUB] Would send search sequence: rotate_right → stop → rotate_left → stop")
+        // Send face-scan rotation sequence to ESP32 via BLE
+        if (esp32Protocol != null) {
+            Log.d(TAG, "Sending face scan sequence to ESP32 via BLE")
+            esp32Protocol.sendFaceScanSequence()
+        } else {
+            Log.d(TAG, "[ESP32-STUB] Would send search sequence: rotate_right → stop → rotate_left → stop")
+        }
 
         // Set up face detection callbacks
         faceDetectorManager.onFaceDetected = { boundingBox, imageProxy ->
@@ -106,7 +112,12 @@ class FaceSearchOrchestrator(
             if (isSearching) {
                 Log.d(TAG, "Face search timeout! No face found in ${timeoutMs}ms")
                 stopSearch()
-                Log.d(TAG, "[ESP32-STUB] Would send STOP command")
+                // Send STOP to ESP32
+                if (esp32Protocol != null) {
+                    esp32Protocol.sendStop()
+                } else {
+                    Log.d(TAG, "[ESP32-STUB] Would send STOP command")
+                }
                 StateManager.updateSubtitle("No puedo verte. Por favor acércate a mi.")
                 ttsManager.speak("No puedo verte. Por favor acércate a mi.") {
                     // Volver a IDLE solo después de que el TTS termine de hablar
@@ -131,8 +142,13 @@ class FaceSearchOrchestrator(
         // Stop searching
         isSearching = false
 
-        // Log ESP32 stop command (BLE not implemented yet — Step 8)
-        Log.d(TAG, "[ESP32-STUB] Would send STOP command to ESP32")
+        // Send STOP to ESP32 — face was found, no more rotation needed
+        if (esp32Protocol != null) {
+            Log.d(TAG, "Sending STOP to ESP32 via BLE (face found)")
+            esp32Protocol.sendStop()
+        } else {
+            Log.d(TAG, "[ESP32-STUB] Would send STOP command to ESP32")
+        }
 
         // Stop camera (no longer needed for searching)
         cameraManager.stop()

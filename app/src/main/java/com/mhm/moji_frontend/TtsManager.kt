@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -16,7 +17,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -35,6 +38,10 @@ class TtsManager(
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    // Elapsed realtime when the current speaking session actually started.
+    @Volatile
+    private var currentSpeechSessionStartElapsedRealtimeMs: Long? = null
+
     // Counts utterances queued but not yet finished
     private val activeUtterances = AtomicInteger(0)
 
@@ -45,12 +52,8 @@ class TtsManager(
     }
 
     private fun getLocaleFromCode(code: String): Locale {
-        return if (code.contains("_")) {
-            val parts = code.split("_")
-            Locale(parts[0], parts[1])
-        } else {
-            Locale(code)
-        }
+        val locale = Locale.forLanguageTag(code.replace('_', '-'))
+        return if (locale.language.isNullOrBlank()) Locale.getDefault() else locale
     }
 
     override fun onInit(status: Int) {
@@ -72,6 +75,9 @@ class TtsManager(
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         Log.d("TtsManager", "TTS Started: $utteranceId")
+                        if (!_isSpeaking.value) {
+                            currentSpeechSessionStartElapsedRealtimeMs = SystemClock.elapsedRealtime()
+                        }
                         _isSpeaking.value = true
                         val state = StateManager.currentState.value
                         if (state != RobotState.LISTENING && state != RobotState.LOADING) {
@@ -140,6 +146,7 @@ class TtsManager(
             // QUEUE_FLUSH cancels all previously queued utterances — reset counter and callbacks
             activeUtterances.set(0)
             onDoneCallbacks.clear()
+            currentSpeechSessionStartElapsedRealtimeMs = null
 
             if (onDone != null) {
                 onDoneCallbacks[utteranceId] = onDone
@@ -155,6 +162,7 @@ class TtsManager(
             abandonAudioFocus()
             activeUtterances.set(0)
             _isSpeaking.value = false
+            currentSpeechSessionStartElapsedRealtimeMs = null
         }
     }
 
@@ -162,6 +170,7 @@ class TtsManager(
         return scope.launch(Dispatchers.IO) {
             if (!isInitialized) return@launch
 
+            currentSpeechSessionStartElapsedRealtimeMs = null
             var buffer = ""
             flow.collect { chunk ->
                 buffer += chunk
@@ -187,6 +196,21 @@ class TtsManager(
                 tts?.speak(buffer.trim(), TextToSpeech.QUEUE_ADD, null, uid)
             }
         }
+    }
+
+    suspend fun getRemainingDelayUntilSpeechStartOffset(
+        offsetMs: Long,
+        timeoutMs: Long = 2500L
+    ): Long? {
+        val startTimestamp = currentSpeechSessionStartElapsedRealtimeMs ?: run {
+            val started = withTimeoutOrNull(timeoutMs) {
+                isSpeaking.first { it }
+            } ?: return null
+            if (started) currentSpeechSessionStartElapsedRealtimeMs else null
+        } ?: return null
+
+        val elapsedSinceStart = SystemClock.elapsedRealtime() - startTimestamp
+        return (offsetMs - elapsedSinceStart).coerceAtLeast(0L)
     }
 
     private fun requestAudioFocus() {
@@ -229,5 +253,6 @@ class TtsManager(
         abandonAudioFocus()
         activeUtterances.set(0)
         _isSpeaking.value = false
+        currentSpeechSessionStartElapsedRealtimeMs = null
     }
 }

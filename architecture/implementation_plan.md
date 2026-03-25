@@ -82,29 +82,29 @@ La app tiene una única máquina de estados centralizada (`StateManager`). Todos
 
 ### Transition Rules
 
-```
+``` 
 IDLE → LISTENING:            Wake word "Hey Moji" detectado (inmediato)
 LISTENING → SEARCHING:       Comienza búsqueda de persona con cámara (inmediato)
 SEARCHING → GREETING:        Rostro reconocido (similitud coseno > 0.70)
 SEARCHING → REGISTERING:     Rostro detectado pero desconocido (similitud ≤ 0.70)
 SEARCHING → LISTENING:       Timeout sin rostro (8s) → TTS "No puedo verte"
-GREETING → LISTENING:        Saludo completado → modo escucha continua 60s
-REGISTERING → LISTENING:     Registro completado → modo escucha continua 60s
+GREETING → LISTENING:        Saludo completado → ventana breve de escucha continua
+REGISTERING → LISTENING:     Registro completado → ventana breve de escucha continua
 LISTENING → THINKING:        Audio capturado (silencio 2s o timeout 10s)
 THINKING → RESPONDING:       Backend emite primer token (emotion tag recibido)
-RESPONDING → LISTENING:      stream_end recibido → continúa escucha continua 60s
-RESPONDING → IDLE:           stream_end recibido + timeout escucha continua agotado
+RESPONDING → LISTENING:      stream_end recibido → continúa escucha continua breve
+RESPONDING → IDLE:           stream_end recibido + timeout corto de escucha agotado
 ANY → ERROR:                 Error de red / timeout / error cámara (2s → IDLE automático)
 ANY → DISCONNECTED:          Backend WebSocket desconectado
 ```
 
 ### Escucha Continua (Conversación Fluida)
 
-Tras la primera interacción, Moji entra en **modo de escucha continua de 60 segundos**:
+Tras la primera interacción, Moji entra en **modo de escucha continua breve**:
 - El usuario puede seguir hablando sin repetir "Hey Moji".
 - Cada vez que hay 2s de silencio tras hablar, el audio se graba y envía al backend.
-- El contador de 60s se reinicia con cada interacción exitosa.
-- Si pasan 60s sin actividad → regresa a `IDLE`.
+- El contador corto se reinicia con cada interacción exitosa.
+- Si vence ese timeout corto sin actividad → regresa a `IDLE`.
 - El wake word solo vuelve a ser necesario cuando se regresa a `IDLE`.
 
 ---
@@ -829,9 +829,9 @@ MainActivity en el manifiesto:
    - Recibir response_meta → mostrar secuencia emojis → enviar acciones al ESP32.
    - Recibir stream_end → interacción completa.
 
-7. LISTENING (modo escucha continua 60s): Listo para siguiente frase sin wake word.
+7. LISTENING (modo escucha continua breve): Listo para siguiente frase sin wake word.
 
-8. IDLE: Tras 60s de inactividad, volver a estado de reposo.
+8. IDLE: Tras agotarse el timeout corto sin actividad, volver a estado de reposo.
 ```
 
 ---
@@ -996,9 +996,9 @@ Añadir al `build.gradle.kts` (app) todas las dependencias listadas en la secci�
    - `TextChunk` → `ttsManager.speakChunked(text)`.
    - `CaptureRequest` → activar cámara → capturar foto/video → enviar `image` o `video` WS.
    - `ResponseMeta` → mostrar secuencia emojis contextuales + loguear acciones ESP32 (BLE en Paso 8).
-   - `StreamEnd` → interacción completa → iniciar escucha continua 60s.
+   - `StreamEnd` → interacción completa → iniciar escucha continua breve.
    - `PersonRegistered` → `faceEmbeddingStore.insertEmbedding(personId, name, lastCapuredEmbedding)`.
-6. Modo escucha continua: countdown 60s. Si el usuario habla → detectar 2s silencio → enviar nuevo audio sin wake word → reiniciar countdown. Si pasan 60s → `IDLE`.
+6. Modo escucha continua: countdown corto. Si el usuario habla → detectar 2s silencio → enviar nuevo audio sin wake word → reiniciar countdown. Si vence el timeout corto → `IDLE`.
 
 **Criterio de éxito:** La app conecta al backend. Decir "Hey Moji" + pregunta → el emoji cambia según emotion tag → el TTS reproduce la respuesta → tras la respuesta se puede hablar de nuevo sin wake word.
 

@@ -1,60 +1,45 @@
 package com.mhm.moji_frontend
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
- * ContinuousListeningManager: Manages the 60-second continuous listening window.
+ * ContinuousListeningManager: Tracks whether follow-up listening is active.
  *
- * After the first interaction, Moji enters continuous listening mode:
- * - The user can keep talking without repeating "Hey Moji"
- * - Each successful interaction resets the 60s countdown
- * - When 60s pass without activity → returns to IDLE
- * - The wake word only becomes necessary again after returning to IDLE
+ * The short no-speech timeout is enforced by AudioRecorder via
+ * INITIAL_GRACE_PERIOD_MS. This manager only keeps the wake-word flow in
+ * follow-up mode until the interaction returns to a terminal state.
  */
 class ContinuousListeningManager {
 
     companion object {
         private const val TAG = "ContinuousListening"
-        private const val CONTINUOUS_LISTEN_TIMEOUT_MS = 60_000L
     }
 
-    private val scope = CoroutineScope(Dispatchers.Main)
-    private var timeoutJob: Job? = null
     private var _isActive = false
 
     val isActive: Boolean get() = _isActive
 
     /**
-     * Start or restart the continuous listening countdown.
+     * Mark continuous listening as active for the next follow-up input.
      * Called after each successful interaction (stream_end received).
      */
     fun startOrReset() {
+        val wasActive = _isActive
         _isActive = true
-        timeoutJob?.cancel()
-
-        Log.d(TAG, "Continuous listening started/reset (60s countdown)")
-
-        timeoutJob = scope.launch {
-            delay(CONTINUOUS_LISTEN_TIMEOUT_MS)
-            Log.d(TAG, "Continuous listening timeout — returning to IDLE")
-            _isActive = false
-            StateManager.updateState(RobotState.IDLE)
-        }
+        Log.d(TAG, if (wasActive) {
+            "Continuous listening remains active for follow-up capture"
+        } else {
+            "Continuous listening activated for follow-up capture"
+        })
     }
 
     /**
-     * Stop continuous listening mode (e.g., when manually going to IDLE or ERROR).
+     * Stop continuous listening mode (e.g., when returning to IDLE/ERROR).
      */
     fun stop() {
-        timeoutJob?.cancel()
-        timeoutJob = null
+        if (_isActive) {
+            Log.d(TAG, "Continuous listening stopped")
+        }
         _isActive = false
-        Log.d(TAG, "Continuous listening stopped")
     }
 }
-

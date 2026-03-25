@@ -58,15 +58,29 @@ class MainActivity : ComponentActivity() {
     private lateinit var audioRecorder: AudioRecorder
     private lateinit var cameraManager: CameraManager
     private lateinit var faceDetectorManager: FaceDetectorManager
+    private lateinit var bleManager: BleManager
+    private lateinit var esp32Protocol: ESP32Protocol
+    private lateinit var heartbeatSender: HeartbeatSender
     private lateinit var faceSearchOrchestrator: FaceSearchOrchestrator
     private lateinit var wsClient: RobotWebSocketClient
     private lateinit var interactionOrchestrator: InteractionOrchestrator
     private var stateObserverJob: Job? = null
 
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.CAMERA
-    )
+    private val requiredPermissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_SCAN
+        )
+    } else {
+        arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
+    }
 
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -75,11 +89,12 @@ class MainActivity : ComponentActivity() {
         if (allGranted) {
             Log.d("MainActivity", "All permissions granted")
             wakeWordDetector.start()
+            bleManager.connect()
         } else {
             val denied = permissions.filter { !it.value }.keys
             Toast.makeText(
                 this,
-                "Se requieren permisos de micrófono y cámara: $denied",
+                "Se requieren permisos de micrófono, cámara y Bluetooth: $denied",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -92,6 +107,7 @@ class MainActivity : ComponentActivity() {
         if (permissionsToRequest.isEmpty()) {
             Log.d("MainActivity", "All permissions already granted")
             wakeWordDetector.start()
+            bleManager.connect()
         } else {
             requestPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
@@ -102,6 +118,53 @@ class MainActivity : ComponentActivity() {
         
         appPreferences = AppPreferences(this)
         ttsManager = TtsManager(this, appPreferences)
+
+        // Initialize BLE components (Step 8)
+        bleManager = BleManager(context = this, preferences = appPreferences)
+        esp32Protocol = ESP32Protocol(bleManager)
+        heartbeatSender = HeartbeatSender(esp32Protocol)
+
+        // Observe BLE state: start/stop heartbeat and update robot battery from telemetry
+        CoroutineScope(Dispatchers.Main).launch {
+            bleManager.bleState.collect { state ->
+                Log.d("MainActivity", "BLE state: $state")
+                when (state) {
+                    BleManager.BleState.READY -> {
+                        Log.d("MainActivity", "BLE READY — starting heartbeat")
+                        heartbeatSender.start()
+                    }
+                    BleManager.BleState.DISCONNECTED -> {
+                        Log.d("MainActivity", "BLE DISCONNECTED — stopping heartbeat")
+                        heartbeatSender.stop()
+                    }
+                    else -> { /* SCANNING, CONNECTING, CONNECTED — transitional */ }
+                }
+            }
+        }
+
+        // Parse incoming telemetry from ESP32 and update robot battery in StateManager
+        bleManager.onDataReceived = { json ->
+            when (val msg = TelemetryParser.parse(json)) {
+                is TelemetryParser.Esp32Message.TelemetryData -> {
+                    val battery = msg.telemetry.battery
+                    if (battery != null && battery.sensorOk) {
+                        Log.d("MainActivity", "Robot battery: ${battery.percentage}% (${battery.busVoltage}V, ${battery.currentMa}mA)")
+                        StateManager.updateRobotBattery(battery.percentage)
+                    }
+                }
+                is TelemetryParser.Esp32Message.CommandConfirmation -> {
+                    val status = msg.status
+                    if (status.errorMsg.isNotBlank()) {
+                        Log.w("MainActivity", "ESP32 command error: ${status.errorMsg}")
+                    } else {
+                        Log.d("MainActivity", "ESP32 command OK: id=${status.commandId}")
+                    }
+                }
+                is TelemetryParser.Esp32Message.Unknown -> {
+                    Log.w("MainActivity", "Unknown ESP32 message: ${msg.rawJson}")
+                }
+            }
+        }
 
         // Initialize WebSocket client (Step 7)
         wsClient = RobotWebSocketClient(appPreferences)
@@ -116,7 +179,8 @@ class MainActivity : ComponentActivity() {
             wsClient = wsClient,
             ttsManager = ttsManager,
             cameraManager = cameraManager,
-            preferences = appPreferences
+            preferences = appPreferences,
+            esp32Protocol = esp32Protocol
         )
 
         // Wire AudioRecorder to send captured audio via WebSocket
@@ -140,7 +204,8 @@ class MainActivity : ComponentActivity() {
             cameraManager = cameraManager,
             faceDetectorManager = faceDetectorManager,
             ttsManager = ttsManager,
-            appPreferences = appPreferences
+            appPreferences = appPreferences,
+            esp32Protocol = esp32Protocol
         )
 
         // Wire interaction_start to be sent as soon as face recognition finishes
@@ -177,10 +242,12 @@ class MainActivity : ComponentActivity() {
                         // Stop continuous listening when IDLE is reached
                         interactionOrchestrator.continuousListeningManager.stop()
                     }
-                    RobotState.ERROR -> {
+                    RobotState.ERROR,
+                    RobotState.DISCONNECTED -> {
                         if (faceSearchOrchestrator.isActive()) {
                             faceSearchOrchestrator.stopSearch()
                         }
+                        interactionOrchestrator.continuousListeningManager.stop()
                     }
                     else -> { /* other states handled elsewhere */ }
                 }
@@ -224,6 +291,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        val allGranted = requiredPermissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            bleManager.connect()
+        }
+    }
+
     override fun onDestroy() {
         stateObserverJob?.cancel()
         interactionOrchestrator.stop()
@@ -233,6 +310,8 @@ class MainActivity : ComponentActivity() {
         audioRecorder.stop()
         wakeWordDetector.stop()
         ttsManager.shutdown()
+        heartbeatSender.stop()
+        bleManager.disconnect()
         super.onDestroy()
     }
 }
