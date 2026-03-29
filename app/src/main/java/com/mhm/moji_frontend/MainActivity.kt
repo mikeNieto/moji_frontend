@@ -16,7 +16,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +46,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -502,6 +500,7 @@ fun RobotFaceScreen() {
         if (showTelemetryDebug) {
             TelemetryDebugPanel(
                 snapshot = latestBleDebugSnapshot,
+                onClose = { showTelemetryDebug = false },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 16.dp, bottom = 56.dp)
@@ -512,27 +511,10 @@ fun RobotFaceScreen() {
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 16.dp)
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(
-                    if (showTelemetryDebug) Color(0xFF88CCEE).copy(alpha = 0.35f)
-                    else Color.White.copy(alpha = 0.08f)
-                )
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = if (showTelemetryDebug) 0.45f else 0.14f),
-                    shape = CircleShape
-                )
+                .padding(end = 10.dp, bottom = 10.dp)
+                .size(48.dp)
                 .clickable { showTelemetryDebug = !showTelemetryDebug }
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(6.dp)
-                    .background(Color.White.copy(alpha = 0.35f), CircleShape)
-            )
-        }
+        )
 
         // Texto Inferior (10% de la pantalla) — DESHABILITADO TEMPORALMENTE
         // Text(
@@ -552,6 +534,7 @@ fun RobotFaceScreen() {
 @Composable
 private fun TelemetryDebugPanel(
     snapshot: TelemetryDebugSnapshot,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val updatedAtLabel = remember(snapshot.updatedAtMillis) {
@@ -575,11 +558,23 @@ private fun TelemetryDebugPanel(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            Text(
-                text = "Debug BLE",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Debug BLE",
+                    modifier = Modifier.weight(1f),
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "Cerrar",
+                    color = Color(0xFF88CCEE),
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.clickable(onClick = onClose)
+                )
+            }
             Text(
                 text = "Payload: ${snapshot.payloadType} • $updatedAtLabel",
                 color = Color(0xFF88CCEE),
