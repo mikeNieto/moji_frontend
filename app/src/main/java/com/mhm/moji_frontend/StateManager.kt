@@ -45,6 +45,9 @@ object StateManager {
     private val _connectionIssue = MutableStateFlow(ConnectionIssue.NONE)
     val connectionIssue: StateFlow<ConnectionIssue> = _connectionIssue.asStateFlow()
 
+    private val _latestBleDebugSnapshot = MutableStateFlow(TelemetryDebugSnapshot.EMPTY)
+    val latestBleDebugSnapshot: StateFlow<TelemetryDebugSnapshot> = _latestBleDebugSnapshot.asStateFlow()
+
     private var backendIssueActive = false
     private var bleIssueActive = false
 
@@ -66,6 +69,10 @@ object StateManager {
 
     fun updateRobotBattery(level: Int) {
         _robotBatteryLevel.value = level
+    }
+
+    fun updateLatestBleDebugPayload(payloadJson: String) {
+        _latestBleDebugSnapshot.value = TelemetryDebugFormatter.fromJson(payloadJson)
     }
 
     fun updateBackendConnection(connected: Boolean) {
