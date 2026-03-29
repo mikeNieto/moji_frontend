@@ -17,6 +17,12 @@ enum class RobotState(val emojiCode: String, val description: String) {
     DISCONNECTED("1F50C", "Desconectado")
 }
 
+enum class ConnectionIssue {
+    NONE,
+    BACKEND,
+    BLE
+}
+
 object StateManager {
     private val _currentState = MutableStateFlow(RobotState.LOADING)
     val currentState: StateFlow<RobotState> = _currentState.asStateFlow()
@@ -35,6 +41,12 @@ object StateManager {
     // WebSocket connection status
     private val _isBackendConnected = MutableStateFlow(false)
     val isBackendConnected: StateFlow<Boolean> = _isBackendConnected.asStateFlow()
+
+    private val _connectionIssue = MutableStateFlow(ConnectionIssue.NONE)
+    val connectionIssue: StateFlow<ConnectionIssue> = _connectionIssue.asStateFlow()
+
+    private var backendIssueActive = false
+    private var bleIssueActive = false
 
     fun updateState(newState: RobotState) {
         _currentState.value = newState
@@ -58,5 +70,26 @@ object StateManager {
 
     fun updateBackendConnection(connected: Boolean) {
         _isBackendConnected.value = connected
+    }
+
+    @Synchronized
+    fun markBackendIssue(active: Boolean) {
+        backendIssueActive = active
+        refreshConnectionIssue()
+    }
+
+    @Synchronized
+    fun markBleIssue(active: Boolean) {
+        bleIssueActive = active
+        refreshConnectionIssue()
+    }
+
+    @Synchronized
+    private fun refreshConnectionIssue() {
+        _connectionIssue.value = when {
+            backendIssueActive -> ConnectionIssue.BACKEND
+            bleIssueActive -> ConnectionIssue.BLE
+            else -> ConnectionIssue.NONE
+        }
     }
 }

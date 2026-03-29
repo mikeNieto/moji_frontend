@@ -97,6 +97,7 @@ class InteractionOrchestrator(
                     RobotWebSocketClient.ConnectionState.AUTHENTICATED -> {
                         Log.d(TAG, "WebSocket authenticated — ready for interactions")
                         StateManager.updateBackendConnection(true)
+                        StateManager.markBackendIssue(false)
                         // If we were DISCONNECTED, restore to IDLE
                         if (StateManager.currentState.value == RobotState.DISCONNECTED) {
                             StateManager.updateState(RobotState.IDLE)

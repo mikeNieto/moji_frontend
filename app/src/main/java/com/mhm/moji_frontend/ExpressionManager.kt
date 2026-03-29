@@ -21,6 +21,8 @@ object ExpressionManager {
         "thinking" to "1F914",      // 🤔
         "error" to "1F615",         // 😕
         "disconnected" to "1F50C",  // 🔌
+        "backend_disconnected" to "1F6DC", // 🌐
+        "ble_disconnected" to "1F4F6", // 📶
         "greeting" to "1F44B",      // 👋
         "registering" to "2753"     // ❓
     )

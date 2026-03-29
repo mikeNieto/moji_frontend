@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var wsClient: RobotWebSocketClient
     private lateinit var interactionOrchestrator: InteractionOrchestrator
     private var stateObserverJob: Job? = null
+    private var hasAttemptedBleConnection = false
 
     private val requiredPermissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
         arrayOf(
@@ -89,7 +90,11 @@ class MainActivity : ComponentActivity() {
         if (allGranted) {
             Log.d("MainActivity", "All permissions granted")
             wakeWordDetector.start()
+            hasAttemptedBleConnection = true
             bleManager.connect()
+            if (bleManager.bleState.value == BleManager.BleState.DISCONNECTED) {
+                StateManager.markBleIssue(true)
+            }
         } else {
             val denied = permissions.filter { !it.value }.keys
             Toast.makeText(
@@ -107,7 +112,11 @@ class MainActivity : ComponentActivity() {
         if (permissionsToRequest.isEmpty()) {
             Log.d("MainActivity", "All permissions already granted")
             wakeWordDetector.start()
+            hasAttemptedBleConnection = true
             bleManager.connect()
+            if (bleManager.bleState.value == BleManager.BleState.DISCONNECTED) {
+                StateManager.markBleIssue(true)
+            }
         } else {
             requestPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
@@ -130,14 +139,22 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "BLE state: $state")
                 when (state) {
                     BleManager.BleState.READY -> {
+                        StateManager.markBleIssue(false)
                         Log.d("MainActivity", "BLE READY — starting heartbeat")
                         heartbeatSender.start()
+                    }
+                    BleManager.BleState.SCANNING,
+                    BleManager.BleState.CONNECTING,
+                    BleManager.BleState.CONNECTED -> {
+                        StateManager.markBleIssue(false)
                     }
                     BleManager.BleState.DISCONNECTED -> {
                         Log.d("MainActivity", "BLE DISCONNECTED — stopping heartbeat")
                         heartbeatSender.stop()
+                        if (hasAttemptedBleConnection) {
+                            StateManager.markBleIssue(true)
+                        }
                     }
-                    else -> { /* SCANNING, CONNECTING, CONNECTED — transitional */ }
                 }
             }
         }
@@ -297,7 +314,11 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
         if (allGranted) {
+            hasAttemptedBleConnection = true
             bleManager.connect()
+            if (bleManager.bleState.value == BleManager.BleState.DISCONNECTED) {
+                StateManager.markBleIssue(true)
+            }
         }
     }
 
@@ -320,11 +341,15 @@ class MainActivity : ComponentActivity() {
 fun RobotFaceScreen() {
     val currentState by StateManager.currentState.collectAsState()
     val currentEmotionTag by StateManager.currentEmotionTag.collectAsState()
+    val connectionIssue by StateManager.connectionIssue.collectAsState()
     // val currentSubtitle by StateManager.currentSubtitle.collectAsState() // DESHABILITADO TEMPORALMENTE
     // val isBackendConnected by StateManager.isBackendConnected.collectAsState()
 
-    // Determine the expression string for ExpressionManager based on state
-    val expression = currentEmotionTag ?: currentState.name.lowercase()
+    val expression = when (connectionIssue) {
+        ConnectionIssue.BACKEND -> "backend_disconnected"
+        ConnectionIssue.BLE -> "ble_disconnected"
+        ConnectionIssue.NONE -> currentEmotionTag ?: currentState.name.lowercase()
+    }
 
     // Animación de escala (Bounce) si está respondiendo (hablando)
     val infiniteTransition = rememberInfiniteTransition(label = "face_animation")
@@ -375,7 +400,7 @@ fun RobotFaceScreen() {
     // Parpadeo lento para DISCONNECTED
     val disconnectedAlpha by infiniteTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = if (currentState == RobotState.DISCONNECTED) 0.3f else 1.0f,
+        targetValue = if (connectionIssue != ConnectionIssue.NONE || currentState == RobotState.DISCONNECTED) 0.3f else 1.0f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -403,7 +428,7 @@ fun RobotFaceScreen() {
         RobotState.SEARCHING, RobotState.THINKING -> searchingRotation
         else -> 0f
     }
-    val finalAlpha = if (currentState == RobotState.DISCONNECTED) disconnectedAlpha else 1f
+    val finalAlpha = if (connectionIssue != ConnectionIssue.NONE || currentState == RobotState.DISCONNECTED) disconnectedAlpha else 1f
     val finalTranslationX = if (currentState == RobotState.ERROR) errorShake else 0f
 
     Box(

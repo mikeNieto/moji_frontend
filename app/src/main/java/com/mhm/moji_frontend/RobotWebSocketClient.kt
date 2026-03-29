@@ -315,8 +315,11 @@ class RobotWebSocketClient(
         _connectionState.value = ConnectionState.DISCONNECTED
         webSocket = null
 
-        // Update StateManager to DISCONNECTED
         scope.launch(Dispatchers.Main) {
+            StateManager.updateBackendConnection(false)
+            if (!isManuallyDisconnected) {
+                StateManager.markBackendIssue(true)
+            }
             if (StateManager.currentState.value != RobotState.DISCONNECTED) {
                 StateManager.updateState(RobotState.DISCONNECTED)
             }
@@ -338,4 +341,3 @@ class RobotWebSocketClient(
         }
     }
 }
-
