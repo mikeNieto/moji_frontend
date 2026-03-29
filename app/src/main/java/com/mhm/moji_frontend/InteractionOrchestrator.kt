@@ -312,8 +312,12 @@ class InteractionOrchestrator(
 
                 esp32Protocol?.executeActions(msg.actions)
                     ?: msg.actions.forEach { action ->
-                        Log.d(TAG, "[ESP32-STUB] ${action.type}: speed=${action.speed}, degrees=${action.degrees}, " +
-                                "duration=${action.durationMs}ms, r=${action.r}, g=${action.g}, b=${action.b}")
+                        Log.d(
+                            TAG,
+                            "[ESP32-STUB] ${action.type}: degrees=${action.degrees}, cm=${action.cm}, " +
+                                "duration=${action.durationMs}ms, r=${action.r}, g=${action.g}, b=${action.b}, " +
+                                "steps=${action.steps?.size ?: 0}"
+                        )
                     }
             }
         }
@@ -368,8 +372,10 @@ class InteractionOrchestrator(
         Log.d(TAG, "Face scan actions received: ${msg.actions.size} actions")
         esp32Protocol?.executeActions(msg.actions)
             ?: msg.actions.forEach { action ->
-                Log.d(TAG, "[ESP32-STUB] ${action.type}: degrees=${action.degrees}, speed=${action.speed}, " +
-                        "duration=${action.durationMs}ms")
+                Log.d(
+                    TAG,
+                    "[ESP32-STUB] ${action.type}: degrees=${action.degrees}, cm=${action.cm}, duration=${action.durationMs}ms"
+                )
             }
     }
 

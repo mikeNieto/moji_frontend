@@ -121,15 +121,15 @@ object WsMessageParser {
 
         return ActionData(
             type = obj.get("type")?.asString ?: "",
-            degrees = if (obj.has("degrees")) obj.get("degrees")?.asInt else null,
-            speed = if (obj.has("speed")) obj.get("speed")?.asInt else null,
-            durationMs = if (obj.has("duration_ms")) obj.get("duration_ms")?.asLong else null,
-            cm = if (obj.has("cm")) obj.get("cm")?.asInt else null,
-            r = if (obj.has("r")) obj.get("r")?.asInt else null,
-            g = if (obj.has("g")) obj.get("g")?.asInt else null,
-            b = if (obj.has("b")) obj.get("b")?.asInt else null,
-            totalDurationMs = if (obj.has("total_duration_ms")) obj.get("total_duration_ms")?.asLong else null,
-            emotionDuring = if (obj.has("emotion_during")) obj.get("emotion_during")?.asString else null,
+            degrees = if (obj.has("degrees") && !obj.get("degrees").isJsonNull) obj.get("degrees").asInt else null,
+            speed = if (obj.has("speed") && !obj.get("speed").isJsonNull) obj.get("speed").asInt else null,
+            durationMs = if (obj.has("duration_ms") && !obj.get("duration_ms").isJsonNull) obj.get("duration_ms").asLong else null,
+            cm = if (obj.has("cm") && !obj.get("cm").isJsonNull) obj.get("cm").asInt else null,
+            r = if (obj.has("r") && !obj.get("r").isJsonNull) obj.get("r").asInt else null,
+            g = if (obj.has("g") && !obj.get("g").isJsonNull) obj.get("g").asInt else null,
+            b = if (obj.has("b") && !obj.get("b").isJsonNull) obj.get("b").asInt else null,
+            totalDurationMs = if (obj.has("total_duration_ms") && !obj.get("total_duration_ms").isJsonNull) obj.get("total_duration_ms").asLong else null,
+            emotionDuring = if (obj.has("emotion_during") && !obj.get("emotion_during").isJsonNull) obj.get("emotion_during").asString else null,
             steps = steps
         )
     }
@@ -231,4 +231,3 @@ object WsMessageParser {
         }
     }
 }
-

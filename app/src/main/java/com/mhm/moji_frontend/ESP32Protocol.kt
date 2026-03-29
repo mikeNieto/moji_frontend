@@ -1,15 +1,92 @@
 package com.mhm.moji_frontend
 
 import android.util.Log
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.mhm.moji_frontend.data.ActionData
-import org.json.JSONArray
-import org.json.JSONObject
+
+/**
+ * Pure JSON serializer for the BLE contract implemented by the ESP32 firmware.
+ * Keeps legacy backend metadata out of the payload actually sent over BLE.
+ */
+object Esp32CommandSerializer {
+    fun heartbeat(timestampMs: Long): String = JsonObject().apply {
+        addProperty("type", "heartbeat")
+        addProperty("timestamp", timestampMs)
+    }.toString()
+
+    fun stop(): String = JsonObject().apply {
+        addProperty("type", "stop")
+    }.toString()
+
+    fun turnRight(degrees: Int): String = turnRightStep(degrees).toString()
+
+    fun turnLeft(degrees: Int): String = turnLeftStep(degrees).toString()
+
+    fun moveForwardCm(cm: Int): String = moveForwardCmStep(cm).toString()
+
+    fun moveBackwardCm(cm: Int): String = moveBackwardCmStep(cm).toString()
+
+    fun moveForwardDuration(durationMs: Long): String = moveForwardDurationStep(durationMs).toString()
+
+    fun moveBackwardDuration(durationMs: Long): String = moveBackwardDurationStep(durationMs).toString()
+
+    fun ledColor(r: Int, g: Int, b: Int, durationMs: Long): String = ledColorStep(r, g, b, durationMs).toString()
+
+    fun moveSequence(steps: List<JsonObject>): String {
+        val stepsArray = JsonArray()
+        steps.forEach { stepsArray.add(it) }
+
+        return JsonObject().apply {
+            addProperty("type", "move_sequence")
+            add("steps", stepsArray)
+        }.toString()
+    }
+
+    fun turnRightStep(degrees: Int): JsonObject = JsonObject().apply {
+        addProperty("type", "turn_right_deg")
+        addProperty("degrees", degrees.coerceAtLeast(0))
+    }
+
+    fun turnLeftStep(degrees: Int): JsonObject = JsonObject().apply {
+        addProperty("type", "turn_left_deg")
+        addProperty("degrees", degrees.coerceAtLeast(0))
+    }
+
+    fun moveForwardCmStep(cm: Int): JsonObject = JsonObject().apply {
+        addProperty("type", "move_forward_cm")
+        addProperty("cm", cm.coerceAtLeast(0))
+    }
+
+    fun moveBackwardCmStep(cm: Int): JsonObject = JsonObject().apply {
+        addProperty("type", "move_backward_cm")
+        addProperty("cm", cm.coerceAtLeast(0))
+    }
+
+    fun moveForwardDurationStep(durationMs: Long): JsonObject = JsonObject().apply {
+        addProperty("type", "move_forward_duration")
+        addProperty("duration_ms", durationMs.coerceAtLeast(0L))
+    }
+
+    fun moveBackwardDurationStep(durationMs: Long): JsonObject = JsonObject().apply {
+        addProperty("type", "move_backward_duration")
+        addProperty("duration_ms", durationMs.coerceAtLeast(0L))
+    }
+
+    fun ledColorStep(r: Int, g: Int, b: Int, durationMs: Long): JsonObject = JsonObject().apply {
+        addProperty("type", "led_color")
+        addProperty("r", r.coerceIn(0, 255))
+        addProperty("g", g.coerceIn(0, 255))
+        addProperty("b", b.coerceIn(0, 255))
+        addProperty("duration_ms", durationMs.coerceAtLeast(0L))
+    }
+}
 
 /**
  * ESP32Protocol: Serializes robot commands to JSON UTF-8 and sends them via BleManager.
  *
  * Handles:
- * - All primitive movement commands (turn, move, led_color, stop)
+ * - Primitive movement commands (turn, move by cm, move by duration, led_color, stop)
  * - Compound move_sequence
  * - Semantic alias compilation: wave, nod, shake_head → move_sequence primitives
  * - Heartbeat messages
@@ -26,119 +103,66 @@ class ESP32Protocol(private val bleManager: BleManager) {
     // ======================== PUBLIC COMMANDS ========================
 
     fun sendHeartbeat(timestampMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "heartbeat")
-            put("timestamp", timestampMs)
-        }.toString()
-        return bleManager.sendJson(json)
+        return bleManager.sendJson(Esp32CommandSerializer.heartbeat(timestampMs))
     }
 
     fun sendStop(): Boolean {
-        val json = JSONObject().apply {
-            put("type", "stop")
-        }.toString()
         Log.d(TAG, "Sending STOP to ESP32")
-        return bleManager.sendJson(json)
+        return bleManager.sendJson(Esp32CommandSerializer.stop())
     }
 
-    fun sendTurnRight(degrees: Int, speed: Int, durationMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "turn_right_deg")
-            put("degrees", degrees)
-            put("speed", speed)
-            put("duration_ms", durationMs)
-        }.toString()
-        return bleManager.sendJson(json)
+    fun sendTurnRight(degrees: Int): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.turnRight(degrees))
     }
 
-    fun sendTurnLeft(degrees: Int, speed: Int, durationMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "turn_left_deg")
-            put("degrees", degrees)
-            put("speed", speed)
-            put("duration_ms", durationMs)
-        }.toString()
-        return bleManager.sendJson(json)
+    fun sendTurnLeft(degrees: Int): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.turnLeft(degrees))
     }
 
-    fun sendMoveForward(cm: Int, speed: Int, durationMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "move_forward_cm")
-            put("cm", cm)
-            put("speed", speed)
-            put("duration_ms", durationMs)
-        }.toString()
-        return bleManager.sendJson(json)
+    fun sendMoveForward(cm: Int): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.moveForwardCm(cm))
     }
 
-    fun sendMoveBackward(cm: Int, speed: Int, durationMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "move_backward_cm")
-            put("cm", cm)
-            put("speed", speed)
-            put("duration_ms", durationMs)
-        }.toString()
-        return bleManager.sendJson(json)
+    fun sendMoveBackward(cm: Int): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.moveBackwardCm(cm))
+    }
+
+    fun sendMoveForwardDuration(durationMs: Long): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.moveForwardDuration(durationMs))
+    }
+
+    fun sendMoveBackwardDuration(durationMs: Long): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.moveBackwardDuration(durationMs))
     }
 
     fun sendLedColor(r: Int, g: Int, b: Int, durationMs: Long): Boolean {
-        val json = JSONObject().apply {
-            put("type", "led_color")
-            put("r", r)
-            put("g", g)
-            put("b", b)
-            put("duration_ms", durationMs)
-        }.toString()
-        return bleManager.sendJson(json)
+        return bleManager.sendJson(Esp32CommandSerializer.ledColor(r, g, b, durationMs))
     }
 
     /**
      * Send a move_sequence with a list of step commands.
-     * Steps must already be compiled to primitives (turn_*, move_*, led_color).
+     * Steps must already be compiled to primitives supported by the ESP32 firmware.
      */
-    fun sendMoveSequence(totalDurationMs: Long, steps: List<JSONObject>): Boolean {
-        val stepsArray = JSONArray()
-        steps.forEach { stepsArray.put(it) }
-
-        val json = JSONObject().apply {
-            put("type", "move_sequence")
-            put("total_duration_ms", totalDurationMs)
-            put("steps", stepsArray)
-        }.toString()
-        return bleManager.sendJson(json)
+    fun sendMoveSequence(steps: List<JsonObject>): Boolean {
+        return bleManager.sendJson(Esp32CommandSerializer.moveSequence(steps))
     }
 
     /**
      * Execute a face-scan rotation sequence — used when SEARCHING for a person.
      * Rotates right 90°, then left 180° to cover the area.
-     * This matches the face_scan_actions pattern from the backend.
      */
     fun sendFaceScanSequence(): Boolean {
         val steps = listOf(
-            JSONObject().apply {
-                put("type", "turn_right_deg")
-                put("degrees", 90)
-                put("speed", 25)
-                put("duration_ms", 1500)
-            },
-            JSONObject().apply {
-                put("type", "turn_left_deg")
-                put("degrees", 180)
-                put("speed", 25)
-                put("duration_ms", 3000)
-            }
+            Esp32CommandSerializer.turnRightStep(90),
+            Esp32CommandSerializer.turnLeftStep(180)
         )
         Log.d(TAG, "Sending face scan sequence to ESP32")
-        return sendMoveSequence(totalDurationMs = 4500, steps = steps)
+        return sendMoveSequence(steps = steps)
     }
 
     /**
      * Process a list of ActionData from ResponseMeta or FaceScanActions
      * and send appropriate BLE commands.
-     *
-     * - Primitive actions (turn_*, move_*, led_color, stop): sent directly
-     * - move_sequence: compile steps recursively and send as one message
-     * - Semantic aliases (wave, nod, shake_head): compiled to move_sequence
      */
     fun executeActions(actions: List<ActionData>) {
         for (action in actions) {
@@ -147,30 +171,30 @@ class ESP32Protocol(private val bleManager: BleManager) {
     }
 
     private fun executeAction(action: ActionData) {
-        Log.d(TAG, "Executing action: type=${action.type}, degrees=${action.degrees}, " +
-                "speed=${action.speed}, durationMs=${action.durationMs}, " +
-                "cm=${action.cm}, r=${action.r}, g=${action.g}, b=${action.b}")
+        Log.d(
+            TAG,
+            "Executing action: type=${action.type}, degrees=${action.degrees}, durationMs=${action.durationMs}, " +
+                "cm=${action.cm}, r=${action.r}, g=${action.g}, b=${action.b}, steps=${action.steps?.size ?: 0}"
+        )
 
         when (action.type) {
             "turn_right_deg" -> sendTurnRight(
-                degrees = action.degrees ?: 90,
-                speed = action.speed ?: 30,
-                durationMs = action.durationMs ?: 1500L
+                degrees = action.degrees ?: 90
             )
             "turn_left_deg" -> sendTurnLeft(
-                degrees = action.degrees ?: 90,
-                speed = action.speed ?: 30,
-                durationMs = action.durationMs ?: 1500L
+                degrees = action.degrees ?: 90
             )
             "move_forward_cm" -> sendMoveForward(
-                cm = action.cm ?: 20,
-                speed = action.speed ?: 40,
-                durationMs = action.durationMs ?: 1000L
+                cm = action.cm ?: 20
             )
             "move_backward_cm" -> sendMoveBackward(
-                cm = action.cm ?: 20,
-                speed = action.speed ?: 40,
-                durationMs = action.durationMs ?: 1000L
+                cm = action.cm ?: 20
+            )
+            "move_forward_duration" -> sendMoveForwardDuration(
+                durationMs = action.durationMs ?: 1500L
+            )
+            "move_backward_duration" -> sendMoveBackwardDuration(
+                durationMs = action.durationMs ?: 1500L
             )
             "led_color" -> sendLedColor(
                 r = action.r ?: 0,
@@ -181,59 +205,40 @@ class ESP32Protocol(private val bleManager: BleManager) {
             "stop" -> sendStop()
 
             "move_sequence" -> {
-                // Compile steps to JSON objects
                 val compiledSteps = (action.steps ?: emptyList()).mapNotNull { step ->
                     compilePrimitiveToJson(step)
                 }
-                sendMoveSequence(
-                    totalDurationMs = action.totalDurationMs ?: action.durationMs ?: 3000L,
-                    steps = compiledSteps
-                )
+                if (compiledSteps.isEmpty()) {
+                    Log.w(TAG, "move_sequence received without valid primitive steps — skipping")
+                } else {
+                    sendMoveSequence(steps = compiledSteps)
+                }
             }
 
             // ────── Semantic aliases: compiled locally, never forwarded as-is ──────
             "wave" -> {
                 Log.d(TAG, "Compiling 'wave' alias → move_sequence")
                 val steps = listOf(
-                    JSONObject().apply {
-                        put("type", "turn_right_deg"); put("degrees", 20)
-                        put("speed", 50); put("duration_ms", 300)
-                    },
-                    JSONObject().apply {
-                        put("type", "turn_left_deg"); put("degrees", 40)
-                        put("speed", 50); put("duration_ms", 400)
-                    },
-                    JSONObject().apply {
-                        put("type", "turn_right_deg"); put("degrees", 20)
-                        put("speed", 50); put("duration_ms", 300)
-                    }
+                    Esp32CommandSerializer.turnRightStep(20),
+                    Esp32CommandSerializer.turnLeftStep(40),
+                    Esp32CommandSerializer.turnRightStep(20)
                 )
-                sendMoveSequence(totalDurationMs = 1000, steps = steps)
+                sendMoveSequence(steps = steps)
             }
 
             "nod" -> {
                 Log.d(TAG, "Compiling 'nod' alias → led_color (visual nod — no tilt axis)")
-                // ESP32 doesn't have a tilt axis; simulate with LED flash
                 sendLedColor(r = 0, g = 200, b = 100, durationMs = 600)
             }
 
             "shake_head" -> {
                 Log.d(TAG, "Compiling 'shake_head' alias → move_sequence")
                 val steps = listOf(
-                    JSONObject().apply {
-                        put("type", "turn_left_deg"); put("degrees", 30)
-                        put("speed", 50); put("duration_ms", 300)
-                    },
-                    JSONObject().apply {
-                        put("type", "turn_right_deg"); put("degrees", 60)
-                        put("speed", 50); put("duration_ms", 500)
-                    },
-                    JSONObject().apply {
-                        put("type", "turn_left_deg"); put("degrees", 30)
-                        put("speed", 50); put("duration_ms", 300)
-                    }
+                    Esp32CommandSerializer.turnLeftStep(30),
+                    Esp32CommandSerializer.turnRightStep(60),
+                    Esp32CommandSerializer.turnLeftStep(30)
                 )
-                sendMoveSequence(totalDurationMs = 1100, steps = steps)
+                sendMoveSequence(steps = steps)
             }
 
             else -> Log.w(TAG, "Unknown action type '${action.type}' — ignoring")
@@ -242,44 +247,24 @@ class ESP32Protocol(private val bleManager: BleManager) {
 
     /**
      * Compile an ActionData primitive step to a JSONObject.
-     * Semantic aliases inside move_sequence steps are compiled recursively.
-     * Returns null if the type is not a known primitive.
+     * Returns null if the type is not a known primitive supported by the ESP32.
      */
-    private fun compilePrimitiveToJson(action: ActionData): JSONObject? {
+    private fun compilePrimitiveToJson(action: ActionData): JsonObject? {
         return when (action.type) {
-            "turn_right_deg" -> JSONObject().apply {
-                put("type", "turn_right_deg")
-                put("degrees", action.degrees ?: 90)
-                put("speed", action.speed ?: 30)
-                put("duration_ms", action.durationMs ?: 1500)
-            }
-            "turn_left_deg" -> JSONObject().apply {
-                put("type", "turn_left_deg")
-                put("degrees", action.degrees ?: 90)
-                put("speed", action.speed ?: 30)
-                put("duration_ms", action.durationMs ?: 1500)
-            }
-            "move_forward_cm" -> JSONObject().apply {
-                put("type", "move_forward_cm")
-                put("cm", action.cm ?: 20)
-                put("speed", action.speed ?: 40)
-                put("duration_ms", action.durationMs ?: 1000)
-            }
-            "move_backward_cm" -> JSONObject().apply {
-                put("type", "move_backward_cm")
-                put("cm", action.cm ?: 20)
-                put("speed", action.speed ?: 40)
-                put("duration_ms", action.durationMs ?: 1000)
-            }
-            "led_color" -> JSONObject().apply {
-                put("type", "led_color")
-                put("r", action.r ?: 0)
-                put("g", action.g ?: 0)
-                put("b", action.b ?: 0)
-                put("duration_ms", action.durationMs ?: 1000)
-            }
-            "stop" -> JSONObject().apply {
-                put("type", "stop")
+            "turn_right_deg" -> Esp32CommandSerializer.turnRightStep(action.degrees ?: 90)
+            "turn_left_deg" -> Esp32CommandSerializer.turnLeftStep(action.degrees ?: 90)
+            "move_forward_cm" -> Esp32CommandSerializer.moveForwardCmStep(action.cm ?: 20)
+            "move_backward_cm" -> Esp32CommandSerializer.moveBackwardCmStep(action.cm ?: 20)
+            "move_forward_duration" -> Esp32CommandSerializer.moveForwardDurationStep(action.durationMs ?: 1500L)
+            "move_backward_duration" -> Esp32CommandSerializer.moveBackwardDurationStep(action.durationMs ?: 1500L)
+            "led_color" -> Esp32CommandSerializer.ledColorStep(
+                r = action.r ?: 0,
+                g = action.g ?: 0,
+                b = action.b ?: 0,
+                durationMs = action.durationMs ?: 1000L
+            )
+            "stop" -> JsonObject().apply {
+                addProperty("type", "stop")
             }
             else -> {
                 Log.w(TAG, "Cannot compile unsupported primitive '${action.type}' in move_sequence step — skipping")
@@ -288,4 +273,3 @@ class ESP32Protocol(private val bleManager: BleManager) {
         }
     }
 }
-

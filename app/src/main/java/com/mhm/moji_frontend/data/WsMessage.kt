@@ -156,17 +156,30 @@ data class ExpressionData(
     val transition: String              // "fade", "bounce", "slide"
 )
 
-data class ActionData(
-    val type: String,
-    val degrees: Int? = null,
-    val speed: Int? = null,
-    val durationMs: Long? = null,
-    val cm: Int? = null,
-    val r: Int? = null,
-    val g: Int? = null,
-    val b: Int? = null,
-    val totalDurationMs: Long? = null,
-    val emotionDuring: String? = null,
-    val steps: List<ActionData>? = null
-)
-
+/**
+ * Generic action model received from backend messages.
+ *
+ * BLE contract used by Android → ESP32 now supports these primitive types:
+ * - turn_right_deg / turn_left_deg          -> uses `degrees`
+ * - move_forward_cm / move_backward_cm      -> uses `cm`
+ * - move_forward_duration / move_backward_duration -> uses `durationMs`
+ * - led_color                               -> uses `r`, `g`, `b`, `durationMs`
+ * - stop
+ * - move_sequence                           -> uses `steps`
+ *
+ * `speed` and `totalDurationMs` are kept only as legacy/compatibility metadata;
+ * the BLE serializer ignores them for the new ESP32 firmware contract.
+ */
+ data class ActionData(
+     val type: String,
+     val degrees: Int? = null,
+     val speed: Int? = null,
+     val durationMs: Long? = null,
+     val cm: Int? = null,
+     val r: Int? = null,
+     val g: Int? = null,
+     val b: Int? = null,
+     val totalDurationMs: Long? = null,
+     val emotionDuring: String? = null,
+     val steps: List<ActionData>? = null
+ )
